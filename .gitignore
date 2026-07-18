@@ -1,0 +1,7 @@
+.env
+venv/
+books.csv
+my_books_db/
+__pycache__/
+*.sqlite3
+.ipynb_checkpoints/
