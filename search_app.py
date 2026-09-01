@@ -8,6 +8,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 chroma_client = chromadb.PersistentClient(path="./my_books_db")
 collection = chroma_client.get_collection(name="african_literature")
 
+
 def query_books(user_prompt, n_results=3):
     # 1. Turn the user's prompt into an embedding
     response = client.embeddings.create(

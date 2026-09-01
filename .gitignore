@@ -1,7 +1,7 @@
-.env
-venv/
 books.csv
+books_with_embeddings.csv
+books_with_embeddings_test.csv
 my_books_db/
+.env
 __pycache__/
-*.sqlite3
-.ipynb_checkpoints/
+*.pyc
