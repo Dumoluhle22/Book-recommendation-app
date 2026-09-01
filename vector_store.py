@@ -4,23 +4,31 @@ import ast
 import os
 import shutil
 
-# 1. Clean start: Delete old database to avoid conflicts
-db_path = "./my_books_db"
-if os.path.exists(db_path):
+# 1. Config
+DB_PATH = "./my_books_db"
+INPUT_CSV = "books_with_embeddings.csv"
+COLLECTION_NAME = "african_literature"
+
+# 2. Clean start: delete old database to avoid stale/duplicate entries
+if os.path.exists(DB_PATH):
     print("Removing old database folder...")
-    shutil.rmtree(db_path)
+    shutil.rmtree(DB_PATH)
 
-# 2. Initialize
+# 3. Initialize ChromaDB
 print("Initializing ChromaDB...")
-client = chromadb.PersistentClient(path=db_path)
-collection = client.create_collection(name="african_literature")
+client = chromadb.PersistentClient(path=DB_PATH)
+collection = client.create_collection(name=COLLECTION_NAME)
 
-# 3. Load data
-file_path = 'books_with_embeddings_test.csv'
-df = pd.read_csv(file_path)
+# 4. Load embedded data
+if not os.path.exists(INPUT_CSV):
+    raise SystemExit(
+        f"ERROR: '{INPUT_CSV}' not found. Run main.py first to generate embeddings."
+    )
+
+df = pd.read_csv(INPUT_CSV)
 print(f"Loading {len(df)} books from CSV...")
 
-# 4. Add to DB
+# 5. Build the lists Chroma needs
 ids = []
 embeddings = []
 metadatas = []
@@ -29,10 +37,30 @@ documents = []
 for i, row in df.iterrows():
     ids.append(str(i))
     embeddings.append(ast.literal_eval(row['embedding']))
-    metadatas.append({"title": row['title'], "author": row['author'], "genre": row['genre'], "trope": "enemies to lovers"})
+
+    # Only include metadata fields that actually exist in the CSV,
+    # so we don't fabricate values (like the old hardcoded trope).
+    metadata = {
+        "title": row['title'],
+        "author": row['author'],
+    }
+    if 'genre' in df.columns and pd.notna(row.get('genre')):
+        metadata["genre"] = row['genre']
+
+    metadatas.append(metadata)
     documents.append(row['desc'])
 
+# 6. Upload to ChromaDB in batches (Chroma has a max batch size per call)
+BATCH_SIZE = 500
 print("Uploading to ChromaDB...")
-collection.add(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
+for start in range(0, len(ids), BATCH_SIZE):
+    end = start + BATCH_SIZE
+    collection.add(
+        ids=ids[start:end],
+        embeddings=embeddings[start:end],
+        metadatas=metadatas[start:end],
+        documents=documents[start:end],
+    )
+    print(f"  Uploaded {min(end, len(ids))}/{len(ids)}")
 
-print(f"Success! {collection.count()} books are now in the database.")
+print(f"\nSuccess! {collection.count()} books are now in the database.")
