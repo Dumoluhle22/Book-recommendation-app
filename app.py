@@ -1,5 +1,6 @@
 import streamlit as st
 import chromadb
+import requests
 from openai import OpenAI
 import os
 import json
@@ -9,7 +10,7 @@ DB_PATH = "./my_books_db"
 COLLECTION_NAME = "african_literature"
 
 st.set_page_config(
-    page_title="Bartech — African Lit Recommender",
+    page_title="Novella",
     page_icon="📖",
     layout="centered",
 )
@@ -17,21 +18,20 @@ st.set_page_config(
 # --- Custom styling ---
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Quicksand:wght@400;500;600;700&display=swap');
 
 :root {
-    --bg: #14171f;
-    --surface: #1e2330;
-    --gold: #c99a3e;
-    --coral: #c1443b;
-    --text: #ede8dd;
-    --muted: #9da3b4;
+    --espresso: #3e2723;
+    --petal: #f4c9d6;
+    --ivory: #f5f0e6;
 }
 
 .stApp {
-    background-color: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
+    background-color: var(--ivory);
+    background-image: radial-gradient(var(--petal) 1.6px, transparent 1.6px);
+    background-size: 22px 22px;
+    color: var(--espresso);
+    font-family: 'Quicksand', sans-serif;
 }
 
 .main .block-container {
@@ -39,49 +39,52 @@ st.markdown("""
     padding-top: 3rem;
 }
 
-/* Title */
 h1 {
-    font-family: 'Fraunces', serif !important;
-    font-weight: 600 !important;
-    font-style: italic;
-    color: var(--text) !important;
-    font-size: 2.4rem !important;
+    font-family: 'Fredoka', sans-serif !important;
+    font-weight: 700 !important;
+    color: var(--espresso) !important;
+    font-size: 2.8rem !important;
     letter-spacing: -0.01em;
     margin-bottom: 0.1rem !important;
 }
 
 .subtitle {
-    color: var(--muted);
+    color: var(--espresso);
+    opacity: 0.65;
+    font-weight: 500;
     font-size: 0.95rem;
     margin-bottom: 2.2rem;
 }
 
-/* Text input */
 div[data-testid="stTextInput"] input {
-    background-color: var(--surface) !important;
-    color: var(--text) !important;
-    border: 1px solid #333a4d !important;
-    border-radius: 8px !important;
+    background-color: var(--ivory) !important;
+    color: var(--espresso) !important;
+    border: 2px solid var(--petal) !important;
+    border-radius: 14px !important;
     padding: 0.7rem 1rem !important;
     font-size: 1rem !important;
+    font-family: 'Quicksand', sans-serif !important;
+    font-weight: 500 !important;
 }
 div[data-testid="stTextInput"] input:focus {
-    border: 1px solid var(--gold) !important;
-    box-shadow: 0 0 0 1px var(--gold) !important;
+    border: 2px solid var(--espresso) !important;
+    box-shadow: 0 0 0 1px var(--espresso) !important;
 }
 div[data-testid="stTextInput"] label {
-    color: var(--muted) !important;
+    color: var(--espresso) !important;
+    opacity: 0.75;
+    font-weight: 600 !important;
     font-size: 0.9rem !important;
 }
 
-/* Button */
 div.stButton > button {
-    background-color: var(--gold) !important;
-    color: #14171f !important;
+    background-color: var(--espresso) !important;
+    color: var(--petal) !important;
     border: none !important;
-    border-radius: 8px !important;
+    border-radius: 14px !important;
+    font-family: 'Fredoka', sans-serif !important;
     font-weight: 600 !important;
-    padding: 0.5rem 1.6rem !important;
+    padding: 0.5rem 1.8rem !important;
     margin-top: 0.6rem;
     transition: opacity 0.15s ease;
 }
@@ -89,44 +92,56 @@ div.stButton > button:hover {
     opacity: 0.85;
 }
 
-/* Info / warning boxes */
 div[data-testid="stAlert"] {
-    background-color: var(--surface) !important;
-    border: 1px solid #333a4d !important;
-    border-radius: 8px !important;
-    color: var(--muted) !important;
+    background-color: #ffffffaa !important;
+    border: 2px solid var(--petal) !important;
+    border-radius: 14px !important;
+    color: var(--espresso) !important;
 }
 
-/* Section heading above results */
 .results-heading {
-    font-family: 'Fraunces', serif;
+    font-family: 'Fredoka', sans-serif;
     font-weight: 600;
-    font-size: 1.3rem;
-    color: var(--text);
+    font-size: 1.4rem;
+    color: var(--espresso);
     margin-top: 2.2rem;
     margin-bottom: 1rem;
 }
 
-/* Book result card */
 .book-card {
-    background-color: var(--surface);
-    border-left: 3px solid var(--gold);
-    border-radius: 6px;
-    padding: 1rem 1.3rem;
-    margin-bottom: 0.9rem;
+    background-color: #ffffffcc;
+    border: 2px solid var(--petal);
+    border-radius: 16px;
+    padding: 1.1rem 1.4rem;
+    margin-bottom: 1rem;
 }
 .book-card .book-title {
-    font-family: 'Fraunces', serif;
+    font-family: 'Fredoka', sans-serif;
     font-weight: 600;
-    font-size: 1.1rem;
-    color: var(--text);
+    font-size: 1.15rem;
+    color: var(--espresso);
     margin-bottom: 0.3rem;
 }
 .book-card .book-reason {
-    font-family: 'Inter', sans-serif;
+    font-family: 'Quicksand', sans-serif;
+    font-weight: 500;
     font-size: 0.92rem;
-    color: var(--muted);
+    color: var(--espresso);
+    opacity: 0.8;
     line-height: 1.5;
+    margin-bottom: 0.5rem;
+}
+.book-card .book-link a {
+    color: var(--espresso);
+    background-color: var(--petal);
+    border-radius: 10px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+.book-card .book-link a:hover {
+    opacity: 0.8;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -184,11 +199,52 @@ def get_reranked_results(user_query, results):
         return []
 
 
+def find_book_link(title, author=""):
+    """Look up a real link for the book: try Google Books first, then Open Library.
+    Returns None if neither source finds a match, so the caller can skip the link."""
+
+    try:
+        query = f"intitle:{title}"
+        if author:
+            query += f"+inauthor:{author}"
+        resp = requests.get(
+            "https://www.googleapis.com/books/v1/volumes",
+            params={"q": query, "maxResults": 1},
+            timeout=5,
+        )
+        data = resp.json()
+        items = data.get("items")
+        if items:
+            info = items[0].get("volumeInfo", {})
+            link = info.get("infoLink") or info.get("previewLink") or info.get("canonicalVolumeLink")
+            if link:
+                return link
+    except requests.RequestException:
+        pass
+
+    try:
+        resp = requests.get(
+            "https://openlibrary.org/search.json",
+            params={"title": title, "author": author, "limit": 1},
+            timeout=5,
+        )
+        data = resp.json()
+        docs = data.get("docs")
+        if docs:
+            key = docs[0].get("key")
+            if key:
+                return f"https://openlibrary.org{key}"
+    except requests.RequestException:
+        pass
+
+    return None
+
+
 # --- Setup ---
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
-st.markdown("<h1>Bartech</h1>", unsafe_allow_html=True)
+st.markdown("<h1>Novella</h1>", unsafe_allow_html=True)
 st.markdown(
     '<div class="subtitle">Tell me the story you\'re chasing — I\'ll find it in the shelves.</div>',
     unsafe_allow_html=True,
@@ -241,13 +297,21 @@ if st.button("Search"):
                 st.warning("Couldn't generate recommendations this time — try searching again.")
             else:
                 st.markdown('<div class="results-heading">Recommended for you</div>', unsafe_allow_html=True)
-                for book in recommendations:
-                    title = book.get('title', 'Untitled')
-                    reason = book.get('reason', '')
-                    st.markdown(
-                        f"""<div class="book-card">
-                            <div class="book-title">{title}</div>
-                            <div class="book-reason">{reason}</div>
-                        </div>""",
-                        unsafe_allow_html=True,
-                    )
+                with st.spinner("Finding where to read them..."):
+                    for book in recommendations:
+                        title = book.get('title', 'Untitled')
+                        reason = book.get('reason', '')
+                        link = find_book_link(title)
+
+                        st.markdown(
+                            f"""
+                            <div class="book-card">
+                                <div class="book-title">{title}</div>
+                                <div class="book-reason">{reason}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                        if link:
+                            st.link_button("📖 View book →", link)
