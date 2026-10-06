@@ -8,6 +8,7 @@ import shutil
 DB_PATH = "./my_books_db"
 INPUT_CSV = "books_with_embeddings.csv"
 COLLECTION_NAME = "african_literature"
+STREAM_BATCH_SIZE = 2000  # rows read from CSV and uploaded per chunk
 
 # 2. Clean start: delete old database to avoid stale/duplicate entries
 if os.path.exists(DB_PATH):
@@ -19,48 +20,51 @@ print("Initializing ChromaDB...")
 client = chromadb.PersistentClient(path=DB_PATH)
 collection = client.create_collection(name=COLLECTION_NAME)
 
-# 4. Load embedded data
+# 4. Check file exists
 if not os.path.exists(INPUT_CSV):
     raise SystemExit(
         f"ERROR: '{INPUT_CSV}' not found. Run main.py first to generate embeddings."
     )
 
-df = pd.read_csv(INPUT_CSV)
-print(f"Loading {len(df)} books from CSV...")
+# 5. Stream the CSV in chunks instead of loading it all into memory at once
+print("Loading and uploading books from CSV in streams...")
 
-# 5. Build the lists Chroma needs
-ids = []
-embeddings = []
-metadatas = []
-documents = []
+row_counter = 0  # used to generate unique IDs across chunks
 
-for i, row in df.iterrows():
-    ids.append(str(i))
-    embeddings.append(ast.literal_eval(row['embedding']))
+for chunk in pd.read_csv(INPUT_CSV, chunksize=STREAM_BATCH_SIZE):
+    # Drop rows with missing title, author, desc, or embedding —
+    # Chroma rejects NaN documents, and a few rows can end up incomplete
+    # if main.py was interrupted/resumed partway through.
+    before = len(chunk)
+    chunk = chunk.dropna(subset=['title', 'author', 'desc', 'embedding'])
+    skipped = before - len(chunk)
+    if skipped:
+        print(f"  Skipped {skipped} row(s) with missing data in this chunk.")
+    if len(chunk) == 0:
+        continue
 
-    # Only include metadata fields that actually exist in the CSV,
-    # so we don't fabricate values (like the old hardcoded trope).
-    metadata = {
-        "title": row['title'],
-        "author": row['author'],
-    }
-    if 'genre' in df.columns and pd.notna(row.get('genre')):
-        metadata["genre"] = row['genre']
+    # Convert the embedding column from string back to actual lists
+    current_embeddings = [ast.literal_eval(x) for x in chunk['embedding'].tolist()]
 
-    metadatas.append(metadata)
-    documents.append(row['desc'])
+    # Generate sequential IDs (your CSV has no 'id' column)
+    current_ids = [str(i) for i in range(row_counter, row_counter + len(chunk))]
+    row_counter += len(chunk)
 
-# 6. Upload to ChromaDB in batches (Chroma has a max batch size per call)
-BATCH_SIZE = 500
-print("Uploading to ChromaDB...")
-for start in range(0, len(ids), BATCH_SIZE):
-    end = start + BATCH_SIZE
+    current_documents = chunk['desc'].tolist()
+
+    # Metadata: only include columns that actually exist
+    metadata_cols = ['title', 'author']
+    if 'genre' in chunk.columns:
+        metadata_cols.append('genre')
+    current_metadatas = chunk[metadata_cols].to_dict(orient='records')
+
     collection.add(
-        ids=ids[start:end],
-        embeddings=embeddings[start:end],
-        metadatas=metadatas[start:end],
-        documents=documents[start:end],
+        ids=current_ids,
+        embeddings=current_embeddings,
+        metadatas=current_metadatas,
+        documents=current_documents,
     )
-    print(f"  Uploaded {min(end, len(ids))}/{len(ids)}")
 
-print(f"\nSuccess! {collection.count()} books are now in the database.")
+    print(f"  Inserted a batch of {len(chunk)} books ({row_counter} total so far).")
+
+print(f"\nSuccess! Total books now in database: {collection.count()}")
