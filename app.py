@@ -200,40 +200,60 @@ def get_reranked_results(user_query, results):
 
 
 def find_book_link(title, author=""):
-    """Look up a real link for the book: try Google Books first, then Open Library.
-    Returns None if neither source finds a match, so the caller can skip the link."""
+    """Find a page for the book using Google Books or Open Library."""
 
     try:
         query = f"intitle:{title}"
         if author:
             query += f"+inauthor:{author}"
+
         resp = requests.get(
             "https://www.googleapis.com/books/v1/volumes",
-            params={"q": query, "maxResults": 1},
-            timeout=5,
+            params={
+                "q": query,
+                "maxResults": 1
+            },
+            timeout=5
         )
+
         data = resp.json()
         items = data.get("items")
+
         if items:
             info = items[0].get("volumeInfo", {})
-            link = info.get("infoLink") or info.get("previewLink") or info.get("canonicalVolumeLink")
+
+            link = (
+                info.get("previewLink")
+                or info.get("infoLink")
+                or info.get("canonicalVolumeLink")
+            )
+
             if link:
                 return link
+
     except requests.RequestException:
         pass
 
     try:
         resp = requests.get(
             "https://openlibrary.org/search.json",
-            params={"title": title, "author": author, "limit": 1},
-            timeout=5,
+            params={
+                "title": title,
+                "author": author,
+                "limit": 1
+            },
+            timeout=5
         )
+
         data = resp.json()
         docs = data.get("docs")
+
         if docs:
             key = docs[0].get("key")
+
             if key:
                 return f"https://openlibrary.org{key}"
+
     except requests.RequestException:
         pass
 
