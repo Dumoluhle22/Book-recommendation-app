@@ -319,9 +319,15 @@ if st.button("Search"):
                 st.markdown('<div class="results-heading">Recommended for you</div>', unsafe_allow_html=True)
                 with st.spinner("Finding where to read them..."):
                     for book in recommendations:
-                        title = book.get('title', 'Untitled')
-                        reason = book.get('reason', '')
+                        title = book.get("title", "Untitled")
+                        reason = book.get("reason", "")
+
                         link = find_book_link(title)
+
+                        # If no direct book link was found, create a search link
+                        if not link:
+                            from urllib.parse import quote
+                            link = f"https://www.google.com/search?q={quote(title + ' book')}"
 
                         st.markdown(
                             f"""
@@ -333,5 +339,23 @@ if st.button("Search"):
                             unsafe_allow_html=True,
                         )
 
-                        if link:
-                            st.link_button("📖 View book →", link)
+                        # Always show a clickable link
+                        st.markdown(
+                            f"""
+                            <a href="{link}" target="_blank"
+                               style="
+                                   display: inline-block;
+                                   background-color: #f4c9d6;
+                                   color: #3e2723;
+                                   padding: 8px 14px;
+                                   border-radius: 10px;
+                                   font-family: 'Quicksand', sans-serif;
+                                   font-weight: 700;
+                                   text-decoration: none;
+                                   margin-bottom: 16px;
+                               ">
+                                📖 View book →
+                            </a>
+                            """,
+                            unsafe_allow_html=True,
+                        )
