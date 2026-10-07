@@ -4,6 +4,7 @@ import requests
 from openai import OpenAI
 import os
 import json
+from urllib.parse import quote
 from dotenv import load_dotenv
 
 DB_PATH = "./my_books_db"
@@ -129,13 +130,14 @@ div[data-testid="stAlert"] {
     color: var(--espresso);
     opacity: 0.8;
     line-height: 1.5;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.6rem;
 }
 .book-card .book-link a {
+    display: inline-block;
     color: var(--espresso);
     background-color: var(--petal);
     border-radius: 10px;
-    padding: 0.25rem 0.7rem;
+    padding: 0.3rem 0.8rem;
     font-size: 0.82rem;
     font-weight: 700;
     text-decoration: none;
@@ -199,65 +201,64 @@ def get_reranked_results(user_query, results):
         return []
 
 
-def find_book_link(title, author=""):
-    """Find a page for the book using Google Books or Open Library."""
-
+def find_readable_book(title, author=""):
+    """
+    Try to find a legitimate online reading/borrowing option via Open Library.
+    Returns {"url": ..., "label": ...} or None if nothing usable is found.
+    """
     try:
-        query = f"intitle:{title}"
+        params = {
+            "title": title,
+            "limit": 10,
+            "fields": "key,title,author_name,ebook_access,has_fulltext,edition_key,ia,availability",
+        }
         if author:
-            query += f"+inauthor:{author}"
+            params["author"] = author
 
-        resp = requests.get(
-            "https://www.googleapis.com/books/v1/volumes",
-            params={
-                "q": query,
-                "maxResults": 1
-            },
-            timeout=5
-        )
-
-        data = resp.json()
-        items = data.get("items")
-
-        if items:
-            info = items[0].get("volumeInfo", {})
-
-            link = (
-                info.get("previewLink")
-                or info.get("infoLink")
-                or info.get("canonicalVolumeLink")
-            )
-
-            if link:
-                return link
-
-    except requests.RequestException:
-        pass
-
-    try:
-        resp = requests.get(
+        response = requests.get(
             "https://openlibrary.org/search.json",
-            params={
-                "title": title,
-                "author": author,
-                "limit": 1
-            },
-            timeout=5
+            params=params,
+            timeout=8,
         )
+        response.raise_for_status()
+        docs = response.json().get("docs", [])
 
-        data = resp.json()
-        docs = data.get("docs")
+        for doc in docs:
+            book_title = doc.get("title", "")
+            if book_title.lower().strip() != title.lower().strip():
+                continue
 
-        if docs:
-            key = docs[0].get("key")
+            ebook_access = doc.get("ebook_access")
+            if ebook_access in ["public", "borrowable"]:
+                availability = doc.get("availability", {})
+                item_url = availability.get("itemURL")
 
-            if key:
-                return f"https://openlibrary.org{key}"
+                if item_url:
+                    label = "📖 Read online →" if ebook_access == "public" else "📚 Borrow & read →"
+                    return {"url": item_url, "label": label}
+
+                key = doc.get("key")
+                if key:
+                    return {"url": f"https://openlibrary.org{key}", "label": "📖 Open in Open Library →"}
 
     except requests.RequestException:
         pass
 
     return None
+
+
+def find_book_link(title, author=""):
+    """
+    Try Open Library for the exact book. If it's not there, fall back to a
+    plain Google search so the user can look it up themselves.
+    Returns {"url": ..., "label": ...}
+    """
+    readable = find_readable_book(title, author)
+    if readable:
+        return readable
+
+    search_url = f"https://www.google.com/search?q={quote(title + ' ' + author + ' book')}"
+    return {"url": search_url, "label": "🔍 Search on Google →"}
 
 
 # --- Setup ---
@@ -322,40 +323,16 @@ if st.button("Search"):
                         title = book.get("title", "Untitled")
                         reason = book.get("reason", "")
 
-                        link = find_book_link(title)
-
-                        # If no direct book link was found, create a search link
-                        if not link:
-                            from urllib.parse import quote
-                            link = f"https://www.google.com/search?q={quote(title + ' book')}"
-
-                        st.markdown(
-                            f"""
-                            <div class="book-card">
-                                <div class="book-title">{title}</div>
-                                <div class="book-reason">{reason}</div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
+                        link_info = find_book_link(title)
+                        link_html = (
+                            f'<div class="book-link"><a href="{link_info["url"]}" target="_blank">{link_info["label"]}</a></div>'
                         )
 
-                        # Always show a clickable link
                         st.markdown(
-                            f"""
-                            <a href="{link}" target="_blank"
-                               style="
-                                   display: inline-block;
-                                   background-color: #f4c9d6;
-                                   color: #3e2723;
-                                   padding: 8px 14px;
-                                   border-radius: 10px;
-                                   font-family: 'Quicksand', sans-serif;
-                                   font-weight: 700;
-                                   text-decoration: none;
-                                   margin-bottom: 16px;
-                               ">
-                                📖 View book →
-                            </a>
-                            """,
+                            f"""<div class="book-card">
+                                <div class="book-title">{title}</div>
+                                <div class="book-reason">{reason}</div>
+                                {link_html}
+                            </div>""",
                             unsafe_allow_html=True,
                         )
